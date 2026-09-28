@@ -25,6 +25,29 @@ const dbPath = process.env.INFOMENTOR_DB || join(outDir, 'infomentor.db')
 const discovery = discoveryMessages(snapshot, { discoveryPrefix })
 const states = stateMessages(snapshot)
 
+// --purge: publicera tomma retained-meddelanden så HA tar bort entiteterna.
+// Används när man går över till HACS-integrationen och vill slippa dubbletter.
+if (process.argv.includes('--purge')) {
+  const store = new Store(dbPath)
+  const purgeMessages = [...discovery, ...states].map((m) => ({
+    topic: m.topic,
+    payload: '',
+    retain: true,
+  }))
+  const ha = readHaEnv(config.ha?.envFile)
+  try {
+    const sent = await publishViaHa(purgeMessages, { url: ha.url, token: ha.token })
+    store.setMeta('discoveryHash', '')
+    console.log(`🧹 Rensade ${sent} MQTT-teman (retainade, tomma) — HA tar bort entiteterna.`)
+  } catch (err) {
+    console.error(`❌ ${err.message}`)
+    process.exitCode = 1
+  } finally {
+    store.close()
+  }
+  process.exit(process.exitCode ?? 0)
+}
+
 const store = new Store(dbPath)
 const hash = messagesHash(discovery)
 const prevHash = store.getMeta('discoveryHash')

@@ -186,6 +186,29 @@ Notes:
 
 ## Home Assistant
 
+There are **two ways** to get this into Home Assistant — pick **one** to avoid
+duplicate entities:
+
+1. **The native integration (recommended for HA):**
+   [`c14ym0re/infomentor-homeassistant`](https://github.com/c14ym0re/infomentor-homeassistant)
+   — install via HACS, configure in the UI, get real entities and devices.
+2. **The MQTT bridge in this repo** (below) — for people who prefer not to
+   install a custom integration, or who run the poller outside HA.
+
+If you use the integration, turn the bridge **off** in `config.json`:
+
+```jsonc
+{ "mqtt": { "enabled": false } }
+```
+
+…and purge the retained topics once so Home Assistant removes the old entities:
+
+```bash
+npm run purge:ha
+```
+
+### MQTT bridge (alternative)
+
 Entities are published with **MQTT Discovery**, so they appear automatically
 under a single "Infomentor" device:
 
