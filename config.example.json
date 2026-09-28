@@ -1,0 +1,12 @@
+{
+  "pollMinutes": 20,
+  "db": "out/infomentor.db",
+  "quietHours": { "from": "20:30", "to": "06:30" },
+  "mqtt": {
+    "enabled": false,
+    "url": "mqtt://homeassistant.local:1883",
+    "username": "",
+    "password": "",
+    "discoveryPrefix": "homeassistant"
+  }
+}

@@ -3,6 +3,7 @@ credentials.json
 smtp.json
 names.json
 lunch.json
+config.json
 
 # Genererat
 out/

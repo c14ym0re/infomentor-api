@@ -2,29 +2,36 @@
 
 Unofficial, dependency-free toolkit for reading **InfoMentor** (the Swedish
 school platform, "Mentor" / "InfoMentor Hub") with a regular **email/password**
-account — and turning it into a **nightly family report delivered by email**.
+account — and turning it into a **family dashboard and notification engine**:
+Home Assistant sensors, event-driven alerts, a searchable history, and an
+evening report delivered by email.
 
 > ⚠️ **Not affiliated with InfoMentor.** For personal use with your own account.
 > The endpoints are undocumented and can change without warning. Use at your own
 > risk and respect the service's terms of use.
 
-## What it does
+## Features
 
-- Logs in with an email/password **Mentor account** (no BankID), following the
+- **Login** with an email/password **Mentor account** (no BankID), following the
   OAuth hand-off into a `hub.infomentor.se` session.
-- Discovers the children (`pupils`) on the account and switches the selected one.
-- Reads notifications, news, calendar, timetable and assignments.
-- Downloads the school lunch menu from Mateo (optional).
-- Builds an evening summary: tomorrow's school day (start–end), a PE/gym
-  reminder, assignments due, calendar events, absence and lunch.
-- Emails it as plain text **and** accessible HTML over any SMTP account.
-- **Zero npm dependencies** — Node 18+ built-in `fetch`; email via Python's
-  stdlib `smtplib`.
+- **Read** notifications, news, calendar, timetable, assignments and attendance,
+  for every child on the account.
+- **School lunch** from Mateo (optional).
+- **Event engine** — compares each poll with the stored state and classifies
+  what is new / changed / removed, with an *immediate* vs *digest* priority.
+- **Poller** (`watch.js`) with quiet hours and backoff, run as cheap cron ticks.
+- **Home Assistant** sensors via **MQTT Discovery** — no broker credentials
+  needed (published through HA's `mqtt.publish`).
+- **History** in SQLite (append-only event log) with search and per-child views.
+- **Evening report** by email — accessible HTML + plain text.
+- **Zero npm dependencies** — Node 18+ built-in `fetch`, `node:sqlite`,
+  `node:test`; email via Python's stdlib `smtplib`. Includes a hand-written
+  MQTT 3.1.1 client.
 
 ## Requirements
 
 - **Node 18+** (tested on Node 22) — nothing to `npm install`.
-- **Python 3** — only used to send email.
+- **Python 3** — only to send email.
 
 ## Quickstart
 
@@ -33,14 +40,14 @@ git clone https://github.com/c14ym0re/infomentor-api.git
 cd infomentor-api
 
 cp credentials.json.example credentials.json   # your InfoMentor email + password
-npm run flow        # shows where an unauthenticated client lands (sanity check)
+npm run flow        # sanity check: where an unauthenticated client lands
 npm run login       # verifies the login and creates a hub session
 npm run probe       # dumps every endpoint it can find into out/
-npm run collect     # collects everything, diffs, writes out/digest.txt
-npm run report      # renders out/kvallsammanfattning.html
-```
 
-To email the report, add `smtp.json` (see below) and run `npm run mail`.
+npm run collect     # collect + diff + write out/digest.txt
+npm run report      # render out/kvallsammanfattning.html
+npm run mail:test   # dry-run of the email
+```
 
 ## Configuration
 
@@ -52,7 +59,8 @@ All local config lives next to the code and is **gitignored**. Only the
 | `credentials.json` | InfoMentor email + password |
 | `names.json` | optional — map hub names to nicknames |
 | `lunch.json` | optional — school-lunch unit (Mateo) |
-| `smtp.json` | SMTP account for sending the report |
+| `smtp.json` | SMTP account for sending email |
+| `config.json` | optional — poller settings (see below) |
 
 ```jsonc
 // credentials.json
@@ -64,44 +72,74 @@ All local config lives next to the code and is **gitignored**. Only the
 // lunch.json — from https://meny.mateo.se/<municipality>/<unitId>
 { "provider": "mateo", "unitId": "123", "school": "Your school" }
 
-// smtp.json — Gmail/Google Workspace example (use an app password!)
+// config.json — poller (defaults shown)
 {
-  "host": "smtp.gmail.com", "port": 587,
-  "username": "you@example.com", "password": "app-password",
-  "from": "you@example.com", "to": ["you@example.com"]
+  "pollMinutes": 20,
+  "digestAt": "18:00",
+  "quietHours": { "from": "20:30", "to": "06:30" },
+  "mqtt": { "enabled": true, "discoveryPrefix": "homeassistant" },
+  "ha": { "envFile": "~/.config/infomentor/ha.env" }
 }
 ```
 
-SMTP needs an **app password**, not your account password. For Gmail/Workspace
-create one at <https://myaccount.google.com/apppasswords> (requires 2-Step
-Verification).
+SMTP needs an **app password**, not your account password (Gmail/Workspace:
+<https://myaccount.google.com/apppasswords>, requires 2-Step Verification).
 
-## Daily automation
+## Running
 
-`run-evening.sh` runs collect → report → mail and logs to `out/cron.log`.
-Add it to cron (adjust the path):
+### Poller
+
+```bash
+npm run watch:once        # one tick (for cron)
+npm run digest            # force an evening report now
+npm run watch             # long-running loop every pollMinutes
+node src/watch.js --once --dry   # test tick: no email/MQTT
+```
+
+Each tick collects, updates the archive, publishes HA sensors, and then:
+
+- sends **immediate alerts** (new/changed assignment, changed/removed calendar
+  entry, registered absence) — unless it's within **quiet hours**;
+- sends the **evening report** once the clock passes `digestAt`, with everything
+  collected since the last one.
+
+Delivered events are marked in the archive, so nothing is sent twice.
+
+### Schedule it (cron)
 
 ```
-0 18 * * * /path/to/infomentor-api/run-evening.sh
+*/20 * * * * /path/to/infomentor-api/run-watch.sh
+```
+
+Ticks instead of a daemon: simple, survives reboots, and all state lives in
+SQLite. `run-watch.sh` logs to `out/watch.log`.
+
+### History
+
+```bash
+npm run history -- status
+npm run history -- search "Test"
+npm run history -- child "Lastname, Firstname" 2026-09-01 2026-10-01
 ```
 
 ## How it works
 
 ```
-src/infomentor.js   cookie jar, redirect handling, login(), hubPost()
-src/collect.js      logs in, switches pupils, collects + diffs, writes out/digest.txt
-src/report.js       renders out/kvallsammanfattning.html (email-safe, accessible)
-src/send_mail.py    sends the report via SMTP (text + HTML alternative)
-src/names.js        nickname mapping (names.json)
-src/lunch.js        school lunch from Mateo (lunch.json)
-src/login.js        verify login
-src/probe.js        enumerate endpoints
-src/probe-apps.js   probe task/uolv2/assessmentv2/documentation/…
-src/flowcheck.js    unauthenticated flow diagnostics
-src/switch-test.js  verify pupil switching
-src/tasks-check.js  verify assignments follow the selected pupil
-src/classlist-check.js / timetable-check.js / week-check.js   focused diagnostics
-run-evening.sh      cron wrapper: collect → report → mail
+src/infomentor.js   cookie jar, login(), hubPost()
+src/gather.js       collect everything → snapshot
+src/events.js       change detection (pure, testable)
+src/store.js        SQLite: current items + append-only event log
+src/digest.js       the evening summary as text
+src/watch.js        poller: tick, quiet hours, alerts, digest
+src/report.js       renders accessible HTML report
+src/send_mail.py    sends email via SMTP (digest + alerts)
+src/ha.js           Home Assistant MQTT Discovery payloads
+src/ha-api.js       publish via HA's mqtt.publish
+src/mqtt.js         hand-written MQTT 3.1.1 client (QoS 0/1, reconnect)
+src/history.js      history CLI
+src/lunch.js        school lunch from Mateo
+src/names.js        nickname mapping
+test/               unit tests (node:test)
 ```
 
 ### Login flow
@@ -115,7 +153,7 @@ POST …/isauthenticated                    → session established
 ```
 
 The session lives in cookies (`ASP.NET_SessionId`, `BIGipServer~…`, `IMHome`).
-Every run simply logs in again, so a dead session is never a problem.
+Every run logs in again, so a dead session is never a problem.
 
 Municipalities differ: some use BankID/SSO (`sso.infomentor.se/login.ashx?idp=…`),
 others the email/password Mentor account used here. Which one works depends on
@@ -145,6 +183,31 @@ Notes:
 - A dead session answers `200` with an **empty body**; treat that as logged out.
 - Notifications are aggregated across all children and mapped back to a pupil
   via `pupilSourceId`.
+
+## Home Assistant
+
+Entities are published with **MQTT Discovery**, so they appear automatically
+under a single "Infomentor" device:
+
+| Entity | Meaning |
+|---|---|
+| `sensor.<child>_skoldag` | school day start–end (next school day) |
+| `sensor.<child>_uppgifter` | assignments due within 7 days |
+| `sensor.<child>_nasta_handelse` | next calendar event |
+| `binary_sensor.<child>_idrott_nasta_skoldag` | PE next school day |
+| `sensor.<child>_lunch` | school lunch (next school day) |
+
+Publishing goes through HA's own MQTT integration (`mqtt.publish`), so no broker
+username/password is required — just `HA_URL` + a long-lived token, e.g. in
+`~/.config/infomentor/ha.env`:
+
+```
+HA_URL=http://homeassistant.local:8123
+HA_TOKEN=…
+```
+
+A standalone MQTT 3.1.1 client (`src/mqtt.js`) is included for direct broker
+publishing if you prefer.
 
 ## Design & accessibility
 

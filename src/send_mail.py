@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
-"""Skickar kvällssammanfattningen via Gmail/SMTP.
+"""Skickar ett mejl via SMTP (Gmail/Workspace m.fl.).
 
-Läser smtp.json (gitignored) + out/digest.txt och out/kvallssammanfattning.html.
+Standard: skickar out/digest.txt som text + out/kvallssammanfattning.html som
+HTML-alternativ. Allt kan styras med miljövariabler:
 
-  python3 src/send_mail.py
-  MAIL_SUBJECT="Eget ämne" python3 src/send_mail.py
-  MAIL_DRY_RUN=1 python3 src/send_mail.py   # visa bara vad som skulle skickas
+  MAIL_SUBJECT       ämne (annars första raden i texten)
+  MAIL_BODY          brödtext direkt
+  MAIL_BODY_FILE     fil med brödtext (annars out/digest.txt)
+  MAIL_HTML_FILE     HTML-alternativ (annars out/kvallssammanfattning.html)
+  MAIL_NO_HTML=1     skicka ingen HTML
+  MAIL_TO            kommaseparerade mottagare (annars smtp.json:s "to")
+  MAIL_DRY_RUN=1     visa bara vad som skulle skickas
+  SMTP_CONFIG        sökväg till smtp.json
 """
 import json
 import os
@@ -17,8 +23,6 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 cfg_path = Path(os.environ.get("SMTP_CONFIG", ROOT / "smtp.json"))
-digest_path = ROOT / "out" / "digest.txt"
-html_path = ROOT / "out" / "kvallssammanfattning.html"
 
 if not cfg_path.exists():
     sys.exit(
@@ -32,27 +36,42 @@ port = int(cfg.get("port", 587))
 username = cfg["username"]
 password = str(cfg["password"]).replace(" ", "")  # Gmail visar app-lösenord i grupper om 4
 sender = cfg.get("from", username)
-recipients = cfg.get("to") or [username]
 
-if not digest_path.exists():
-    sys.exit(f"Saknar {digest_path} — kör `npm run collect` först.")
+if os.environ.get("MAIL_TO"):
+    recipients = [a.strip() for a in os.environ["MAIL_TO"].split(",") if a.strip()]
+else:
+    recipients = cfg.get("to") or [username]
 
-digest = digest_path.read_text().strip()
-first_line = digest.splitlines()[0] if digest else "Infomentor"
-subject = os.environ.get("MAIL_SUBJECT") or first_line
+# --- brödtext
+if os.environ.get("MAIL_BODY") is not None:
+    body = os.environ["MAIL_BODY"].strip()
+else:
+    body_file = Path(os.environ.get("MAIL_BODY_FILE", ROOT / "out" / "digest.txt"))
+    if not body_file.exists():
+        sys.exit(f"Saknar {body_file} — kör insamlingen först.")
+    body = body_file.read_text().strip()
+
+subject = os.environ.get("MAIL_SUBJECT") or (body.splitlines()[0] if body else "Infomentor")
+
+# --- HTML-alternativ
+html = None
+if os.environ.get("MAIL_NO_HTML") != "1":
+    html_file = Path(os.environ.get("MAIL_HTML_FILE", ROOT / "out" / "kvallssammanfattning.html"))
+    if html_file.exists():
+        html = html_file.read_text()
 
 msg = EmailMessage()
 msg["From"] = sender
 msg["To"] = ", ".join(recipients)
 msg["Subject"] = subject
-msg.set_content(digest)
-if html_path.exists():
-    msg.add_alternative(html_path.read_text(), subtype="html")
+msg.set_content(body)
+if html:
+    msg.add_alternative(html, subtype="html")
 
 if os.environ.get("MAIL_DRY_RUN"):
-    print(f"[dry-run] skulle skicka till: {', '.join(recipients)}")
+    print(f"[dry-run] till: {', '.join(recipients)}")
     print(f"[dry-run] ämne: {subject}")
-    print(f"[dry-run] text {len(digest)} tecken, html {'ja' if html_path.exists() else 'nej'}")
+    print(f"[dry-run] text {len(body)} tecken, html {'ja' if html else 'nej'}")
     sys.exit(0)
 
 context = ssl.create_default_context()
