@@ -50,7 +50,14 @@ export function buildEntities(snapshot) {
     const lessons = (snapshot.events ?? [])
       .filter((e) => e.kind === 'Schema' && e.child === child && schoolDay && dayOf(e.start) === schoolDay)
       .sort((a, b) => a.start.localeCompare(b.start))
-    const skoldag = lessons.length ? `${timeOf(lessons[0].start)}–${timeOf(lessons[lessons.length - 1].end || lessons[0].start)}` : ''
+    const lastEnd = lessons.reduce(
+      (max, lesson) => {
+        const value = timeOf(lesson.end || lesson.start)
+        return value > max ? value : max
+      },
+      ''
+    )
+    const skoldag = lessons.length ? `${timeOf(lessons[0].start)}–${lastEnd}` : ''
 
     ents.push({
       id: `${base}_skoldag`,

@@ -44,6 +44,18 @@ test('buildEntities ger skoldag, uppgifter, nästa händelse, idrott och lunch',
   assert.equal(lunch.value, 'Torsk')
 })
 
+test('skoldagen slutar vid sista lektionens slut (max sluttid, inte sista i startordning)', () => {
+  const snap = {
+    ...snapshot,
+    events: [
+      { key: 'k1', child: 'Efternamn, Anna', kind: 'Schema', title: 'Aktivitet', start: '2026-09-29T08:00:00', end: '2026-09-29T14:00:00' },
+      { key: 'k2', child: 'Efternamn, Anna', kind: 'Schema', title: 'Sv', start: '2026-09-29T10:00:00', end: '2026-09-29T11:00:00' },
+    ],
+  }
+  const skoldag = buildEntities(snap).entities.find((e) => e.id.endsWith('_skoldag'))
+  assert.equal(skoldag.value, '08:00–14:00')
+})
+
 test('discovery-meddelanden är retained och pekar rätt', () => {
   const msgs = discoveryMessages(snapshot)
   assert.ok(msgs.length > 0)

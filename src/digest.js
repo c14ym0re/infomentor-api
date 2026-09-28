@@ -93,8 +93,16 @@ export function buildDigest(snapshot, opts = {}) {
       continue
     }
     const first = dayEvents[0]
-    const last = dayEvents[dayEvents.length - 1]
-    L.push(`  ${displayName(p.name)}: ${String(first.start).slice(11, 16)}–${String(last.end || last.start).slice(11, 16)}`)
+    // Skoldagen slutar när SISTA lektionen slutar (max sluttid) — aktivitetsblock
+    // kan sträcka sig längre än den sista lektionen i startordning.
+    const lastEnd = dayEvents.reduce(
+      (max, item) => {
+        const value = String(item.end || item.start).slice(11, 16)
+        return value > max ? value : max
+      },
+      ''
+    )
+    L.push(`  ${displayName(p.name)}: ${String(first.start).slice(11, 16)}–${lastEnd}`)
   }
   L.push('')
 

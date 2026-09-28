@@ -140,12 +140,19 @@ const cards = snap.pupils
       .filter((e) => e.kind === 'Schema' && e.child === name && peDay && dayOf(e.start) === peDay)
       .sort((a, b) => a.start.localeCompare(b.start))
     const first = dayEvents[0]
-    const last = dayEvents[dayEvents.length - 1]
+    // Max sluttid, inte sista posten i startordning (aktivitetsblock kan vara längre).
+    const lastEnd = dayEvents.reduce(
+      (max, item) => {
+        const value = timeOf(item.end || item.start)
+        return value > max ? value : max
+      },
+      ''
+    )
     const schoolDayLine =
       dayEvents.length
         ? `<p style="margin:0;font-family:${FONT};font-size:19px;line-height:26px;font-weight:600;color:${C.ink};">${esc(
             timeOf(first.start)
-          )}–${esc(timeOf(last.end || last.start))}</p>`
+          )}–${esc(lastEnd)}</p>`
         : mutedRow('Ingen skoldag.')
     const tasks = snap.tasks
       .filter((t) => t.child === name && !isDone(t.status) && t.due && dayOf(t.due) >= at(0) && dayOf(t.due) <= week)
@@ -267,7 +274,7 @@ const html = `<!doctype html>
     ${peBanner ? `<tr><td>${peBanner}</td></tr>` : ''}
     ${lunchBox ? `<tr><td>${lunchBox}</td></tr>` : ''}
     ${cards}
-    <tr><td style="padding:8px 0 0;text-align:center;font-family:${FONT};font-size:13px;line-height:18px;color:${C.ink3};">Hämtat från Infomentor</td></tr>
+    <tr><td style="padding:8px 0 0;text-align:center;font-family:${FONT};font-size:13px;line-height:18px;color:${C.ink3};">Hämtat från Infomentor · Kommunen</td></tr>
   </table>
 </td></tr>
 </table>
