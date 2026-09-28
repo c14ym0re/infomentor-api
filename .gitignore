@@ -1,0 +1,12 @@
+# Känsliga lokala filer — committa aldrig
+credentials.json
+smtp.json
+names.json
+lunch.json
+
+# Genererat
+out/
+*.log
+
+# Node
+node_modules/

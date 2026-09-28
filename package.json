@@ -1,0 +1,22 @@
+{
+  "name": "infomentor-api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Unofficial toolkit: log in to InfoMentor with an email/password (Mentor) account, read calendar/timetable/assignments, and build a nightly family report delivered by email.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "flow": "node src/flowcheck.js",
+    "login": "node src/login.js",
+    "probe": "node src/probe.js",
+    "probe:apps": "node src/probe-apps.js",
+    "collect": "node src/collect.js",
+    "report": "node src/report.js",
+    "mail": "python3 src/send_mail.py",
+    "mail:test": "MAIL_DRY_RUN=1 python3 src/send_mail.py",
+    "week": "node src/week-check.js"
+  }
+}

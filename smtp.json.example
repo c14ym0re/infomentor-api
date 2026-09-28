@@ -1,0 +1,8 @@
+{
+  "host": "smtp.gmail.com",
+  "port": 587,
+  "username": "din-epost@exempel.se",
+  "password": "APP-LÖSENORD-HÄR",
+  "from": "din-epost@exempel.se",
+  "to": ["din-epost@exempel.se"]
+}
