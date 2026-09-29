@@ -198,8 +198,12 @@ Notes:
   - `statement` — curriculum criteria, incl. per-level (`levelHeader` E/C/A)
     assessment texts.
 - `GetAllTasks {id}` returns the **assignments linked to the plan**
-  (`{type, hasMore, tasks[]}`). `GetAllObjectives {id}` answers empty and
-  `GetTimelineEntries` answers `HTTP 500` for a parent account.
+  (`{type, hasMore, tasks[]}`). These are the *same* objects as the `GetTasks`
+  list — the call adds the **link** (which tests and homework belong to this
+  unit), not new data. `title`, `dueDate`, `status`, `milestoneCount` /
+  `milestonesComplete` are the useful ones for a parent view.
+  `GetAllObjectives {id}` answers empty and `GetTimelineEntries` answers
+  `HTTP 500` for a parent account.
 - A plan also arrives as a notification — `appType: Uol`,
   `type: UnitOfLearning` (published) or `UolUpdated` (changed),
   `url: #/uolv2/show/<id>`.
