@@ -3,6 +3,6 @@
   "port": 587,
   "username": "din-epost@exempel.se",
   "password": "APP-LÖSENORD-HÄR",
-  "from": "din-epost@exempel.se",
+  "from": "infomentor@exempel.se",
   "to": ["din-epost@exempel.se"]
 }

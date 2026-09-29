@@ -24,8 +24,16 @@ export function parseEnv(text) {
   return out
 }
 
-export function readHaEnv(path = process.env.HA_ENV_FILE || join(homedir(), '.config', 'infomentor', 'ha.env')) {
-  const env = parseEnv(readFileSync(path, 'utf8'))
+/** Expanderar en inledande ~ till hemkatalogen (vanligt i exempelkonfig). */
+export function expandHome(path) {
+  const value = String(path ?? '')
+  return value.startsWith('~/') ? join(homedir(), value.slice(2)) : value
+}
+
+export function readHaEnv(
+  path = process.env.HA_ENV_FILE || join(homedir(), '.config', 'infomentor', 'ha.env')
+) {
+  const env = parseEnv(readFileSync(expandHome(path), 'utf8'))
   if (!env.HA_URL || !env.HA_TOKEN) throw new Error(`${path} saknar HA_URL/HA_TOKEN`)
   return { url: env.HA_URL.replace(/\/$/, ''), token: env.HA_TOKEN }
 }

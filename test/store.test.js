@@ -51,6 +51,74 @@ test('pruneMissing tar bort poster som försvunnit', () => {
   s.close()
 })
 
+test('pruneMissing undantar nyheter och planeringar', () => {
+  const s = fresh()
+  const items = itemsFromSnapshot({
+    ...snap(),
+    news: [{ id: 9, title: 'Info', published: '2026-09-27' }],
+    plans: [{ key: 'A|plan|1', child: 'A', id: '1', title: 'Spanska', subjects: [], state: 'active' }],
+  })
+  s.applyItems(items, '2026-09-28T18:00:00Z')
+  // Nästa svar saknar allt utom uppgiften — nyheter och planeringar ska ändå
+  // ligga kvar (annars blir de "nya" igen varje tick).
+  const removed = s.pruneMissing(['A|task|10'], { exceptKinds: ['news', 'plan'] })
+  const left = [...s.getPrevIndex().keys()].sort()
+  assert.deepEqual(left, ['A|plan|1', 'A|task|10', 'news|9'])
+  assert.equal(removed, 3) // notis, kalenderpost och frånvaro
+  s.close()
+})
+
+test('seededKinds utgår från arkivet när metan saknas', () => {
+  const s = fresh()
+  s.applyItems(
+    itemsFromSnapshot({
+      ...snap(),
+      plans: [{ key: 'A|plan|1', child: 'A', id: '1', title: 'Spanska', subjects: [], state: 'active' }],
+    })
+  )
+  assert.deepEqual([...s.seededKinds()].sort(), [
+    'absence',
+    'calendar',
+    'notification',
+    'plan',
+    'task',
+  ])
+  s.setMeta('seededKinds', 'task')
+  assert.deepEqual([...s.seededKinds()], ['task'])
+  s.close()
+})
+
+test('planDetails samlar kända planeringsdetaljer med tidsstämpel', () => {
+  const s = fresh()
+  s.applyItems(
+    itemsFromSnapshot({
+      ...snap(),
+      plans: [
+        {
+          key: 'A|plan|1',
+          child: 'A',
+          id: '1',
+          title: 'Spanska',
+          subjects: [],
+          state: 'active',
+          start: '2026-08-18',
+          teachers: ['Erika'],
+          fields: { Tidplan: 'V.40' },
+          fetchedAt: 1700,
+        },
+        { key: 'B|plan|2', child: 'B', id: '2', title: 'Bild', subjects: [], state: 'finished' },
+      ],
+    })
+  )
+  const details = s.planDetails()
+  assert.deepEqual([...details.keys()].sort(), ['1', '2'])
+  assert.equal(details.get('1').at, 1700)
+  assert.equal(details.get('1').info.start, '2026-08-18')
+  assert.deepEqual(details.get('1').info.fields, { Tidplan: 'V.40' })
+  assert.equal(details.get('2').at, 0) // aldrig hämtad
+  s.close()
+})
+
 test('pendingEvents: postens eget id skriver inte över radens id (regression)', () => {
   const s = fresh()
   const items = itemsFromSnapshot({

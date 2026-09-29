@@ -14,8 +14,10 @@ evening report delivered by email.
 
 - **Login** with an email/password **Mentor account** (no BankID), following the
   OAuth hand-off into a `hub.infomentor.se` session.
-- **Read** notifications, news, calendar, timetable, assignments and attendance,
-  for every child on the account.
+- **Read** notifications, news, calendar, timetable, assignments, attendance and
+  **plans** (Unit of Learning) for every child on the account.
+- **Plans** carry period, teachers and the **assignments linked to the plan**
+  (`GetAllTasks`) — and when a plan is *edited* the alert says what changed.
 - **School lunch** from Mateo (optional).
 - **Event engine** — compares each poll with the stored state and classifies
   what is new / changed / removed, with an *immediate* vs *digest* priority.
@@ -24,6 +26,10 @@ evening report delivered by email.
   needed (published through HA's `mqtt.publish`).
 - **History** in SQLite (append-only event log) with search and per-child views.
 - **Evening report** by email — accessible HTML + plain text.
+- **Ops** — a weekly **health check** (archive age, log warnings, InfoMentor
+  entries in the HA log) and an **issue/fork watch** for your GitHub repos.
+- **Home Assistant tooling** — install a Lovelace **dashboard** from a JSON file
+  over HA's WebSocket API, and set the integration's **options** over REST.
 - **Zero npm dependencies** — Node 18+ built-in `fetch`, `node:sqlite`,
   `node:test`; email via Python's stdlib `smtplib`. Includes a hand-written
   MQTT 3.1.1 client.
@@ -61,6 +67,7 @@ All local config lives next to the code and is **gitignored**. Only the
 | `lunch.json` | optional — school-lunch unit (Mateo) |
 | `smtp.json` | SMTP account for sending email |
 | `config.json` | optional — poller settings (see below) |
+| `dashboard.json` | optional — a Lovelace view for `npm run dashboard` |
 
 ```jsonc
 // credentials.json
@@ -77,10 +84,29 @@ All local config lives next to the code and is **gitignored**. Only the
   "pollMinutes": 20,
   "digestAt": "18:00",
   "quietHours": { "from": "20:30", "to": "06:30" },
+  "adminEmail": "you@example.com",
+  // turn this OFF if you use the HACS integration instead (recommended)
   "mqtt": { "enabled": true, "discoveryPrefix": "homeassistant" },
-  "ha": { "envFile": "~/.config/infomentor/ha.env" }
+  "ha": {
+    "envFile": "~/.config/infomentor/ha.env",
+    "dashboardFile": "dashboard.json"
+  },
+  "github": {
+    "repos": ["your-user/infomentor-api"],
+    "credentialsFile": "~/.config/infomentor/git-credentials"
+  },
+  "integrationOptions": {
+    "scan_interval": 20,
+    "enable_lunch": true,
+    "mateo_unit_id": "123",
+    "names": "Lastname, Firstname = Nickname"
+  }
 }
 ```
+
+Paths may start with `~`. Environment overrides: `HA_ENV_FILE`,
+`DASHBOARD_FILE`, `GITHUB_TOKEN` / `GITHUB_CREDENTIALS`, `INFOMENTOR_DB` and
+`MAIL_DRY_RUN=1` (dry-run the email).
 
 SMTP needs an **app password**, not your account password (Gmail/Workspace:
 <https://myaccount.google.com/apppasswords>, requires 2-Step Verification).
@@ -108,11 +134,16 @@ Delivered events are marked in the archive, so nothing is sent twice.
 ### Schedule it (cron)
 
 ```
-*/20 * * * * /path/to/infomentor-api/run-watch.sh
+# poll — offset so it doesn't collide with the HA integration's own interval
+5,35 * * * * /path/to/infomentor-api/run-watch.sh
+# issue/fork watch, twice a day
+10 8,20 * * * /path/to/infomentor-api/run-issuewatch.sh
+# weekly health check
+0 8 * * 1    /path/to/infomentor-api/run-health.sh
 ```
 
 Ticks instead of a daemon: simple, survives reboots, and all state lives in
-SQLite. `run-watch.sh` logs to `out/watch.log`.
+SQLite. The `run-*.sh` wrappers log to `out/`.
 
 ### History
 
@@ -122,6 +153,41 @@ npm run history -- search "Test"
 npm run history -- child "Lastname, Firstname" 2026-09-01 2026-10-01
 ```
 
+### Home Assistant dashboard
+
+```bash
+npm run dashboard               # push dashboard.json as the view /skol-panel
+npm run dashboard -- --dry      # just report what would be written
+DASHBOARD_FILE=my.json npm run dashboard
+```
+
+The view is written through HA's **WebSocket API** (the same path the UI uses),
+so `.storage` is never hand-edited. Ready-made example dashboards live in the
+integration repo:
+[`examples/`](https://github.com/c14ym0re/infomentor-homeassistant/tree/main/examples).
+
+### Integration options over the API
+
+```bash
+node src/set-options.js         # applies config.integrationOptions
+```
+
+### Health check and issue/fork watch
+
+```bash
+npm run health                  # print the weekly report
+npm run health:mail             # mail it to config.adminEmail
+npm run issues                  # diff since the last run, mail on new activity
+                                # (the first run only sets a baseline)
+npm run issues:report           # mail the current state
+```
+
+The health check looks at the archive age (vs `pollMinutes`), warnings in
+`out/watch.log`, and InfoMentor warnings/errors in the HA log — read with
+`ssh root@<ha-host> ha core logs`, and skipped with a note if SSH isn't set up.
+The issue watch tracks new issues, comments and **forks** in
+`config.github.repos`.
+
 ## How it works
 
 ```
@@ -130,6 +196,7 @@ src/gather.js       collect everything → snapshot
 src/events.js       change detection (pure, testable)
 src/store.js        SQLite: current items + append-only event log
 src/digest.js       the evening summary as text
+src/plans.js        plans and their linked assignments (pure)
 src/watch.js        poller: tick, quiet hours, alerts, digest
 src/report.js       renders accessible HTML report
 src/send_mail.py    sends email via SMTP (digest + alerts)
@@ -139,6 +206,10 @@ src/mqtt.js         hand-written MQTT 3.1.1 client (QoS 0/1, reconnect)
 src/history.js      history CLI
 src/lunch.js        school lunch from Mateo
 src/names.js        nickname mapping
+src/healthcheck.js  weekly health report
+src/issuewatch.js   GitHub issue/comment/fork watch
+src/install-dashboard.js  push a Lovelace view via HA's WebSocket API
+src/set-options.js  set the integration's options via HA's REST API
 test/               unit tests (node:test)
 ```
 
@@ -216,7 +287,9 @@ duplicate entities:
 
 1. **The native integration (recommended for HA):**
    [`c14ym0re/infomentor-homeassistant`](https://github.com/c14ym0re/infomentor-homeassistant)
-   — install via HACS, configure in the UI, get real entities and devices.
+   — install via HACS, configure in the UI, get real entities and devices. Example
+   dashboards are in its [`examples/`](https://github.com/c14ym0re/infomentor-homeassistant/tree/main/examples);
+   `npm run dashboard` in this repo pushes your own view into HA.
 2. **The MQTT bridge in this repo** (below) — for people who prefer not to
    install a custom integration, or who run the poller outside HA.
 

@@ -13,7 +13,14 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gather } from './gather.js'
 import { Store } from './store.js'
-import { itemsFromSnapshot, detectChanges } from './events.js'
+import {
+  itemsFromSnapshot,
+  detectChanges,
+  dedupePlanNotifications,
+  dropEnrichmentChanges,
+  seedNewKinds,
+} from './events.js'
+import { planChanges } from './plans.js'
 import { buildDigest, formatEventLines } from './digest.js'
 import { discoveryMessages, stateMessages } from './ha.js'
 import { publishViaHa, readHaEnv, messagesHash } from './ha-api.js'
@@ -104,19 +111,40 @@ async function sendEmail(store, { subject, bodyFile, htmlFile, noHtml, events })
 }
 
 async function tick({ forceDigest = false } = {}) {
-  const snapshot = await gather({ log: (m) => log(`gather: ${m}`) })
-  writeFileSync(join(outDir, 'snapshot.json'), JSON.stringify(snapshot, null, 2))
-
   const store = new Store(config.db)
   try {
     const initialized = store.getMeta('initialized') === '1'
+    // Posttyper som redan fått sin baslinje (se seedNewKinds).
+    const seeded = store.seededKinds()
+    const snapshot = await gather({
+      log: (m) => log(`gather: ${m}`),
+      // Planeringsdetaljen är ett anrop per planering: hämta den bara när
+      // planeringar är en känd typ (annars vore hela listan "ny").
+      knownPlans: initialized && seeded.has('plan') ? store.planDetails() : null,
+    })
+    writeFileSync(join(outDir, 'snapshot.json'), JSON.stringify(snapshot, null, 2))
+
+    const prevIndex = store.getPrevIndex()
     const items = itemsFromSnapshot(snapshot)
     const todayIso = new Date().toISOString().slice(0, 10)
-    const events = initialized ? detectChanges(store.getPrevIndex(), items, { today: todayIso }) : []
+    let events = initialized ? detectChanges(prevIndex, items, { today: todayIso }) : []
+    // En ny posttyp (t.ex. planeringar) får en baslinje i stället för att larma
+    // för hela sin historik; första gången en planerings detalj hämtas är ingen
+    // ändring; och en planering aviseras en gång — inte både som notis och som
+    // plan-händelse.
+    const seededNow = seedNewKinds(events, items, seeded)
+    events = dropEnrichmentChanges(dedupePlanNotifications(seededNow.events), prevIndex)
+    for (const e of events) {
+      if (e.type === 'plan.changed') e.changedFields = planChanges(prevIndex.get(e.key) ?? {}, e)
+    }
+    store.setMeta('seededKinds', [...seededNow.seeded].join(','))
+
     store.applyItems(items)
-    // Nyheter är i praktiken append-only: ett tillfälligt ofullständigt svar ska
-    // inte rensa dem (då blir allt "nytt" igen nästa tick).
-    store.pruneMissing(items.filter((i) => i.kind !== 'news').map((i) => i.key))
+    // Nyheter och planeringar är append-only och gallras aldrig (exceptKinds).
+    store.pruneMissing(
+      items.map((i) => i.key),
+      { exceptKinds: ['news', 'plan'] }
+    )
     if (events.length) store.logEvents(events)
     store.setMeta('initialized', '1')
     store.setMeta('lastPoll', snapshot.collectedAt)

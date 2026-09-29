@@ -1,6 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { itemsFromSnapshot, indexByKey, detectChanges, summarize } from '../src/events.js'
+import {
+  itemsFromSnapshot,
+  indexByKey,
+  detectChanges,
+  summarize,
+  dedupePlanNotifications,
+  dropEnrichmentChanges,
+  seedNewKinds,
+} from '../src/events.js'
 
 const snap = (over = {}) => ({
   notifications: [{ id: 1, child: 'A', title: 'Nyhet', subTitle: 'x', date: '2026-09-28', appType: 'News' }],
@@ -107,4 +115,90 @@ test('summarize grupperar per barn', () => {
   const groups = summarize(detectChanges(indexByKey([]), items))
   assert.equal(groups.length, 2)
   assert.deepEqual(groups.map((g) => g.child).sort(), ['A', 'B'])
+})
+
+const plan = (over = {}) => ({
+  key: 'A|plan|1',
+  child: 'A',
+  id: '1',
+  title: 'Spanska 1C',
+  subjects: ['Spanska'],
+  state: 'active',
+  description: 'att ställa frågor',
+  url: '/#/uolv2/show/1',
+  start: '2026-08-18',
+  end: '2026-12-18',
+  teachers: ['Erika'],
+  fields: { Tidplan: 'V.40' },
+  fetchedAt: 1,
+  ...over,
+})
+
+test('ny planering blir plan.new (immediate) med beskrivning', () => {
+  const prev = indexByKey(itemsFromSnapshot(snap()))
+  const next = snap({ plans: [plan()] })
+  const events = detectChanges(prev, itemsFromSnapshot(next))
+  const ev = events.find((e) => e.type === 'plan.new')
+  assert.equal(ev.priority, 'immediate')
+  assert.equal(ev.description, 'att ställa frågor')
+  assert.deepEqual(ev.subjects, ['Spanska'])
+})
+
+test('avslutad planering blir plan.changed (immediate)', () => {
+  const prev = indexByKey(itemsFromSnapshot(snap({ plans: [plan()] })))
+  const next = itemsFromSnapshot(snap({ plans: [plan({ state: 'finished' })] }))
+  const events = detectChanges(prev, next)
+  assert.equal(events.length, 1)
+  assert.equal(events[0].type, 'plan.changed')
+  assert.equal(events[0].priority, 'immediate')
+})
+
+test('ändrat startdatum eller lärare fångas', () => {
+  const prev = indexByKey(itemsFromSnapshot(snap({ plans: [plan({ start: '2026-08-18', teachers: ['Erika'] })] })))
+  const next = itemsFromSnapshot(
+    snap({ plans: [plan({ start: '2026-09-01', teachers: ['Erika', 'Mathilda'] })] })
+  )
+  const ev = detectChanges(prev, next).find((e) => e.type === 'plan.changed')
+  assert.deepEqual(
+    ev.changes.map((c) => c.field).sort(),
+    ['start', 'teachers']
+  )
+})
+
+test('första detaljhämtningen är ingen ändring', () => {
+  // Posten saknar detalj (fetchedAt null) och får period/lärare/fält nästa tick.
+  const bare = { start: undefined, end: undefined, teachers: undefined, fields: undefined, fetchedAt: undefined }
+  const prev = indexByKey(itemsFromSnapshot(snap({ plans: [plan(bare)] })))
+  const enriched = itemsFromSnapshot(snap({ plans: [plan()] }))
+  const events = detectChanges(prev, enriched)
+  assert.equal(events.length, 1)
+  assert.equal(events[0].type, 'plan.changed')
+  // …men den filtreras bort: föregående post hade aldrig någon detalj.
+  assert.deepEqual(dropEnrichmentChanges(events, prev), [])
+  // När detaljen väl är känd behålls ändringar.
+  const known = indexByKey(enriched)
+  const changed = itemsFromSnapshot(snap({ plans: [plan({ start: '2026-09-01' })] }))
+  assert.equal(dropEnrichmentChanges(detectChanges(known, changed), known).length, 1)
+})
+
+test('planeringsnotisen tas bort när plan.new finns i samma omgång', () => {
+  const notif = { type: 'notification.new', id: '9', url: '#/uolv2/show/8615622' }
+  const other = { type: 'notification.new', id: '8', url: '/#/communication/news/1' }
+  const ny = { type: 'plan.new', id: '8615622' }
+  assert.deepEqual(dedupePlanNotifications([notif, other, ny]).map((e) => e.id), ['8', '8615622'])
+  // utan plan.new behålls notisen (då finns ingen beskrivning att visa)
+  assert.deepEqual(dedupePlanNotifications([notif]), [notif])
+})
+
+test('seedNewKinds ger en ny posttyp en baslinje', () => {
+  const items = [{ kind: 'plan' }, { kind: 'task' }]
+  const events = [
+    { kind: 'plan', type: 'plan.new' },
+    { kind: 'task', type: 'task.new' },
+  ]
+  const first = seedNewKinds(events, items, new Set(['task']))
+  assert.deepEqual(first.events.map((e) => e.type), ['task.new'])
+  assert.deepEqual([...first.seeded].sort(), ['plan', 'task'])
+  // andra körningen är typen känd — inget filtreras längre
+  assert.equal(seedNewKinds(events, items, first.seeded).events.length, 2)
 })

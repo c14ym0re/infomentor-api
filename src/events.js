@@ -16,6 +16,8 @@ const KIND_PRIORITY = {
   'calendar.changed': IMMEDIATE,
   'calendar.removed': IMMEDIATE,
   'notification.new': IMMEDIATE,
+  'plan.new': IMMEDIATE,
+  'plan.changed': IMMEDIATE,
   'news.new': DIGEST,
   'absence.registered': IMMEDIATE,
   'absence.changed': IMMEDIATE,
@@ -30,6 +32,7 @@ const WATCHED_FIELDS = {
   calendar: ['title', 'start', 'end', 'extra'],
   notification: ['title', 'subTitle', 'date'],
   lesson: [],
+  plan: ['title', 'subjects', 'state', 'start', 'end', 'teachers', 'fields'],
   news: ['title', 'published'],
   absence: ['absentToday', 'absentTomorrow', 'pendingLeave'],
 }
@@ -62,6 +65,9 @@ export function itemsFromSnapshot(snap) {
       status: t.status,
       overdue: !!t.overdue,
       url: t.url,
+      // Kopplingen till planeringen (sätts av gather när uppgiften hör till en).
+      // Visas i mejlet men övervakas inte — larmet kommer från uppgiften själv.
+      plan: t.plan,
     })
   }
   for (const e of snap.events ?? []) {
@@ -88,6 +94,28 @@ export function itemsFromSnapshot(snap) {
       absentTomorrow: !!a.absentTomorrow,
       pendingLeave: a.pendingLeaveRequests ?? 0,
       sessionsToday: a.absentSessionsToday ?? [],
+    })
+  }
+  for (const p of snap.plans ?? []) {
+    items.push({
+      kind: 'plan',
+      key: p.key,
+      child: p.child,
+      id: String(p.id),
+      title: p.title,
+      subjects: p.subjects ?? [],
+      state: p.state ?? '',
+      description: p.description ?? '',
+      url: p.url ?? '',
+      // Från detaljen (GetUol + GetAllTasks) — saknas tills den hämtats.
+      start: p.start,
+      end: p.end,
+      term: p.term,
+      grade: p.grade,
+      teachers: p.teachers,
+      fields: p.fields,
+      assignments: p.assignments,
+      fetchedAt: p.fetchedAt,
     })
   }
   for (const n of snap.news ?? []) {
@@ -185,6 +213,59 @@ export function detectChanges(prevIndex, items, opts = {}) {
   }
 
   return events
+}
+
+/**
+ * En planering aviseras två gånger: som notis (`appType: Uol`) och som
+ * `plan.new`/`plan.changed`. När båda finns i samma omgång räcker plan-händelsen
+ * — den bär innehållet. Notisen behålls när planeringen inte synts till i
+ * listan än (då har vi inget bättre att visa).
+ */
+export function dedupePlanNotifications(events) {
+  const ids = new Set(
+    events
+      .filter((e) => e.type === 'plan.new' || e.type === 'plan.changed')
+      .map((e) => String(e.id))
+  )
+  if (!ids.size) return events
+  return events.filter((e) => {
+    if (e.type !== 'notification.new') return true
+    const match = /\/uolv2\/show\/(\d+)/.exec(e.url ?? '')
+    return !(match && ids.has(match[1]))
+  })
+}
+
+/**
+ * Första gången en planerings detalj hämtas fylls posten på med period, lärare
+ * och planeringsfält. Det är ingen *ändring* — posten får sin baslinje.
+ * Utan detta skulle varje ny detalj se ut som en ändring.
+ */
+export function dropEnrichmentChanges(events, prevIndex) {
+  return events.filter((e) => {
+    if (e.type !== 'plan.changed') return true
+    const prev = prevIndex.get(e.key)
+    return prev?.fetchedAt != null
+  })
+}
+
+/**
+ * Posttyper som arkivet aldrig sett förut får en baslinje i stället för att
+ * larma för hela sin historik. Används när en ny typ börjar samlas in (t.ex.
+ * planeringar) så att befintliga poster inte blir "nya" allihop på en gång.
+ *
+ * @param {object[]} events
+ * @param {object[]} items — aktuella poster
+ * @param {Set<string>} [seeded] — typer som redan fått sin baslinje
+ * @returns {{events: object[], seeded: Set<string>}}
+ */
+export function seedNewKinds(events, items, seeded = new Set()) {
+  const kinds = new Set(items.map((i) => i.kind))
+  const fresh = [...kinds].filter((k) => !seeded.has(k))
+  if (!fresh.length) return { events, seeded }
+  return {
+    events: events.filter((e) => !fresh.includes(e.kind)),
+    seeded: new Set([...seeded, ...fresh]),
+  }
 }
 
 /** En rad i en batchad digest, eller tom sträng om inget. */

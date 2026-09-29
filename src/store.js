@@ -58,6 +58,18 @@ export class Store {
     this.db.close()
   }
 
+  /**
+   * Posttyper som redan fått sin baslinje (se events.seedNewKinds). Saknas metan
+   * — t.ex. första körningen efter att en ny typ börjat samlas in — utgår vi
+   * från typerna i arkivet, så att bara genuint nya typer får en baslinje i
+   * stället för att varenda typ tystas en gång.
+   */
+  seededKinds() {
+    const meta = this.getMeta('seededKinds')
+    if (meta !== null) return new Set(meta.split(',').filter(Boolean))
+    return new Set([...this.getPrevIndex().values()].map((i) => i.kind))
+  }
+
   /** Föregående läge som ett index nycklat på item.key — för diffning. */
   getPrevIndex() {
     const rows = this.db.prepare('SELECT key, data FROM items').all()
@@ -97,19 +109,25 @@ export class Store {
     return { inserted, updated }
   }
 
-  /** Tar bort poster som inte längre finns (t.ex. borttagna kalenderposter). */
-  pruneMissing(keepKeys) {
+  /**
+   * Tar bort poster som inte längre finns (t.ex. borttagna kalenderposter).
+   *
+   * `exceptKinds` undantas alltid: nyheter och planeringar är i praktiken
+   * append-only, och ett tillfälligt ofullständigt svar får inte rensa dem (då
+   * blir allt "nytt" igen nästa tick — och för planeringar betyder det larm).
+   */
+  pruneMissing(keepKeys, { exceptKinds = [] } = {}) {
     const keep = new Set(keepKeys)
-    const rows = this.db.prepare('SELECT key FROM items').all()
+    const except = new Set(exceptKinds)
+    const rows = this.db.prepare('SELECT key, kind FROM items').all()
     const del = this.db.prepare('DELETE FROM items WHERE key = ?')
     let removed = 0
     this.db.exec('BEGIN')
     try {
       for (const r of rows) {
-        if (!keep.has(r.key)) {
-          del.run(r.key)
-          removed++
-        }
+        if (keep.has(r.key) || except.has(r.kind)) continue
+        del.run(r.key)
+        removed++
       }
       this.db.exec('COMMIT')
     } catch (err) {
@@ -117,6 +135,25 @@ export class Store {
       throw err
     }
     return removed
+  }
+
+  /**
+   * Kända planeringsdetaljer: id → {at, info}. Gather hämtar detaljen bara när
+   * den är ny, äldre än ett dygn eller aviserad som ändrad — detaljen kostar ett
+   * anrop per planering. Planeringar gallras aldrig bort (exceptKinds i
+   * pruneMissing), så en planering från ett tidigare läsår blir inte "ny" igen.
+   */
+  planDetails() {
+    const out = new Map()
+    for (const item of this.getPrevIndex().values()) {
+      if (item.kind !== 'plan' || !item.id) continue
+      const { start, end, teachers, term, grade, fields, description, assignments, fetchedAt } = item
+      out.set(String(item.id), {
+        at: fetchedAt ?? 0,
+        info: { start, end, teachers, term, grade, fields, description, assignments },
+      })
+    }
+    return out
   }
 
   /** Loggar händelser i den append-only historiken. */

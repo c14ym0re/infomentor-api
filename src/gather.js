@@ -5,6 +5,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { login, hubPost, follow } from './infomentor.js'
 import { fetchLunchCalendar, lunchConfig } from './lunch.js'
+import { normalizePlans, normalizePlanTasks, planInfo } from './plans.js'
+
+/** Hur länge en hämtad planeringsdetalj får ligga innan vi kollar om den ändrats. */
+const PLAN_DETAIL_TTL_MS = 24 * 3600 * 1000
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const iso = (d) => d.toISOString().slice(0, 10)
@@ -42,11 +46,17 @@ function childFromSourceId(sourceId, byPupilId) {
 
 /**
  * Loggar in och samlar in allt.
- * @param {{credentialsPath?: string, log?: (msg: string) => void}} [opts]
+ * @param {{credentialsPath?: string, log?: (msg: string) => void,
+ *          knownPlans?: Map<string, {at: number, info: object}> | null}} [opts]
+ *        knownPlans — id → senast hämtade detalj (med tidsstämpel). En detalj
+ *        hämtas bara för nya planeringar, när den är äldre än ett dygn, eller
+ *        när hubben aviserat `UolUpdated`. `null` = hämta ingen detalj
+ *        (baslinje/första körningen).
  * @returns {Promise<object>} snapshot
  */
 export async function gather(opts = {}) {
   const log = opts.log ?? (() => {})
+  const knownPlans = opts.knownPlans ?? null
   const creds = JSON.parse(readFileSync(opts.credentialsPath || join(root, 'credentials.json'), 'utf8'))
   const { jar } = await login({ username: creds.username || creds.email, password: creds.password })
 
@@ -75,8 +85,20 @@ export async function gather(opts = {}) {
     by: n.publishedBy || '',
   }))
 
+  // Hubben aviserar ändrade planeringar som `appType: Uol`, `type: UolUpdated`
+  // med url `#/uolv2/show/<id>`. Då hämtar vi om detaljen direkt i stället för
+  // att vänta på dygnsrefreshen.
+  const updatedPlans = new Set()
+  for (const n of notifications) {
+    const match = /\/uolv2\/show\/(\d+)/.exec(n.url || '')
+    if (match && /^uol$/i.test(n.appType || '') && /updated/i.test(n.type || '')) {
+      updatedPlans.add(`${n.child}|${match[1]}`)
+    }
+  }
+
   const events = []
   const tasks = []
+  const plans = []
   const absences = []
   for (const p of pupils) {
     await follow(jar, p.switchPupilUrl)
@@ -154,6 +176,62 @@ export async function gather(opts = {}) {
         url: `/#/task/show/${t.id}`,
       })
     }
+
+    const uolRes = (await hubPost(jar, '/UolV2/UolV2/GetUols', {})).json ?? {}
+    const pupilPlans = []
+    for (const plan of normalizePlans(uolRes)) {
+      const known = knownPlans?.get(plan.id) ?? null
+      // Ett detaljanrop per planering: hämta bara när den är ny, kan ha
+      // ändrats (dygnsrefresh eller UolUpdated) — och aldrig för avslutade.
+      const stale = !known || Date.now() - (known.at || 0) > PLAN_DETAIL_TTL_MS
+      const fetchDetail =
+        !!knownPlans &&
+        plan.state !== 'finished' &&
+        (stale || updatedPlans.has(`${p.name}|${plan.id}`))
+      let info = known?.info ?? {}
+      if (fetchDetail) {
+        try {
+          const detail = (await hubPost(jar, '/UolV2/UolV2/GetUol', { id: plan.id })).json
+          info = planInfo(detail)
+        } catch (err) {
+          log(`[plan] kunde inte hämta detaljen för ${plan.id}: ${err.message}`)
+        }
+        // Samma pass: uppgifterna som hör till planeringen (ett anrop till, men
+        // bara när detaljen ändå hämtas).
+        try {
+          const res = (await hubPost(jar, '/UolV2/UolV2/GetAllTasks', { id: plan.id })).json
+          const assignments = normalizePlanTasks(res)
+          if (assignments.length) info = { ...info, assignments }
+        } catch (err) {
+          log(`[plan] kunde inte hämta uppgifterna för ${plan.id}: ${err.message}`)
+        }
+      }
+      pupilPlans.push({
+        key: `${p.name}|plan|${plan.id}`,
+        child: p.name,
+        id: plan.id,
+        title: plan.title,
+        subjects: plan.subjects,
+        state: plan.state,
+        url: `/#/uolv2/show/${plan.id}`,
+        ...info,
+        fetchedAt: fetchDetail ? Date.now() : known?.at,
+      })
+    }
+
+    // Omvänd koppling (uppgift → planering) så att mejlets uppgiftslarm kan säga
+    // vilket arbetsområde uppgiften hör till. Öppna planeringar går före.
+    const planByTask = new Map()
+    for (const plan of pupilPlans) {
+      if (plan.state === 'finished') continue
+      for (const a of plan.assignments ?? []) {
+        if (!planByTask.has(a.id)) planByTask.set(a.id, plan.title)
+      }
+    }
+    for (const task of tasks) {
+      if (task.child === p.name && planByTask.has(task.id)) task.plan = planByTask.get(task.id)
+    }
+    plans.push(...pupilPlans)
   }
 
   await restoreOriginalPupil(jar, pupils)
@@ -175,6 +253,7 @@ export async function gather(opts = {}) {
     news,
     events,
     tasks,
+    plans,
     absences,
     lunch: lunchCfg ? { school: lunchCfg.school || '', unitId: lunchCfg.unitId, calendar: lunchCalendar } : null,
   }

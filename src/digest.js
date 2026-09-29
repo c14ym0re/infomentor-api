@@ -1,6 +1,7 @@
 // Kvällssammanfattningen som text. Tar ett snapshot + (valfritt) händelser.
 // Ren funktion — ingen I/O — så den kan användas av både collect.js och watch.js.
 import { displayName } from './names.js'
+import { formatPeriod } from './plans.js'
 
 const iso = (d) => d.toISOString().slice(0, 10)
 const plus = (n) => iso(new Date(Date.now() + n * 864e5))
@@ -163,8 +164,61 @@ export function buildDigest(snapshot, opts = {}) {
   return L.join('\n')
 }
 
+/** Kortar en lång titel utan att kapa mitt i ett ord. */
+function short(text, max) {
+  const value = String(text ?? '')
+  if (value.length <= max) return value
+  return `${value.slice(0, max).replace(/\s+\S*$/, '')}…`
+}
+
+/** 'Prov: Samhällsekonomi (23 okt.), Loggbok v.36' — högst tre, sedan +N. */
+function assignmentLine(assignments) {
+  const shown = assignments
+    .slice(0, 3)
+    .map((a) => (a.due ? `${a.title} (${fmt(a.due)})` : a.title))
+  if (assignments.length > 3) shown.push(`+${assignments.length - 3}`)
+  return shown.join(', ')
+}
+
+/** " (Spanska · 18/8–18/12 · Erika Kvarnbrink)" — eller tom sträng. */
+function planMeta(plan) {
+  const bits = []
+  if (plan.subjects?.length) bits.push(plan.subjects.join(', '))
+  const period = formatPeriod(plan.start, plan.end)
+  if (period) bits.push(period)
+  if (plan.teachers?.length) {
+    const rest = plan.teachers.length > 1 ? ` +${plan.teachers.length - 1}` : ''
+    bits.push(`${plan.teachers[0]}${rest}`)
+  }
+  return bits.length ? ` (${bits.join(' · ')})` : ''
+}
+
+/**
+ * Lärare publicerar ibland samma planering två gånger (identisk titel, period
+ * och lärare, men olika id). Två rader om samma sak ser ut som ett fel — visa
+ * den en gång, både i sammanfattningen och i de akuta notiserna.
+ */
+export function dedupeIdenticalPlans(events) {
+  const seen = new Set()
+  return events.filter((e) => {
+    if (e.type !== 'plan.new' && e.type !== 'plan.changed') return true
+    const sig = [
+      e.child,
+      e.title,
+      (e.subjects ?? []).join(','),
+      e.start ?? '',
+      e.end ?? '',
+      (e.teachers ?? []).join(','),
+    ].join('|')
+    if (seen.has(sig)) return false
+    seen.add(sig)
+    return true
+  })
+}
+
 /** Formaterar händelser som punktrader (delas av digest och akuta notiser). */
 export function formatEventLines(events) {
+  events = dedupeIdenticalPlans(events)
   const lines = []
   for (const n of events.filter((e) => e.type === 'notification.new').slice(0, 15))
     lines.push(
@@ -172,24 +226,45 @@ export function formatEventLines(events) {
     )
   for (const e of events.filter((e) => e.type === 'calendar.new').slice(0, 15))
     lines.push(`• [${displayName(e.child)}] Nytt i kalendern: ${e.title}  (${fmt(e.start)})`)
-  for (const t of events.filter((e) => e.type === 'task.new').slice(0, 15))
-    lines.push(`• [${displayName(t.child)}] NY UPPGIFT: ${t.title}${t.subject ? ` (${t.subject})` : ''} — förfaller ${fmt(t.due)}`)
+  for (const t of events.filter((e) => e.type === 'task.new').slice(0, 15)) {
+    lines.push(
+      `• [${displayName(t.child)}] NY UPPGIFT: ${t.title}${t.subject ? ` (${t.subject})` : ''} — förfaller ${fmt(t.due)}`
+    )
+    if (t.plan) lines.push(`    i planeringen "${short(t.plan, 60)}"`)
+  }
   for (const t of events.filter((e) => e.type === 'task.done').slice(0, 10))
     lines.push(`• [${displayName(t.child)}] KLAR: ${t.title}`)
   for (const e of events.filter((e) => e.type === 'calendar.changed').slice(0, 10))
     lines.push(`• [${displayName(e.child)}] ÄNDRAD: ${e.title}  (${fmt(e.start)})`)
   for (const e of events.filter((e) => e.type === 'calendar.removed').slice(0, 10))
     lines.push(`• [${displayName(e.child)}] BORTTAGEN: ${e.title}  (${fmt(e.start)})`)
+  for (const p of events.filter((e) => e.type === 'plan.new').slice(0, 10)) {
+    lines.push(`• [${displayName(p.child)}] NY PLANERING: ${p.title}${planMeta(p)}`)
+    if (p.description) lines.push(`    ${p.description}`)
+    if (p.assignments?.length) lines.push(`    ingår: ${assignmentLine(p.assignments)}`)
+  }
+  for (const p of events.filter((e) => e.type === 'plan.changed').slice(0, 10)) {
+    const what = (p.changedFields ?? []).map((c) => c.label).join(', ')
+    lines.push(
+      `• [${displayName(p.child)}] ÄNDRAD PLANERING: ${p.title}${planMeta(p)}${what ? ` — ${what}` : ''}`
+    )
+    for (const c of (p.changedFields ?? []).filter((c) => c.to).slice(0, 3)) {
+      lines.push(`    ${c.label}: ${String(c.to).slice(0, 200)}`)
+    }
+  }
   for (const a of events.filter((e) => e.type.startsWith('absence.')).slice(0, 10))
     lines.push(`• [${displayName(a.child)}] FRÅNVARO: ${a.title}`)
   return lines
 }
 
 function countBits(events) {
+  events = dedupeIdenticalPlans(events)
   const c = (t) => events.filter((e) => e.type === t).length
   const bits = [`${c('notification.new')} notis(er)`, `${c('calendar.new')} kalenderhändelse(r)`, `${c('task.new')} ny(a) uppgift(er)`]
   if (c('calendar.changed')) bits.push(`${c('calendar.changed')} ändrad(e)`)
   if (c('calendar.removed')) bits.push(`${c('calendar.removed')} borttagen(borttagna)`)
+  if (c('plan.new')) bits.push(`${c('plan.new')} ny(a) planering(ar)`)
+  if (c('plan.changed')) bits.push(`${c('plan.changed')} ändrad(e) planering(ar)`)
   if (c('task.done')) bits.push(`${c('task.done')} klar(a)`)
   const abs = events.filter((e) => e.type.startsWith('absence.')).length
   if (abs) bits.push(`${abs} frånvarohändelse(r)`)
