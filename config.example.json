@@ -1,7 +1,23 @@
 {
   "pollMinutes": 20,
-  "db": "out/infomentor.db",
+  "digestAt": "18:00",
   "quietHours": { "from": "20:30", "to": "06:30" },
+  "db": "out/infomentor.db",
+  "adminEmail": "din-epost@exempel.se",
+  "ha": {
+    "envFile": "~/.config/infomentor/ha.env",
+    "dashboardFile": "dashboard.json"
+  },
+  "github": {
+    "repos": ["ditt-konto/infomentor-api"],
+    "credentialsFile": "~/.config/infomentor/git-credentials"
+  },
+  "integrationOptions": {
+    "scan_interval": 20,
+    "enable_lunch": false,
+    "mateo_unit_id": "",
+    "names": ""
+  },
   "mqtt": {
     "enabled": false,
     "url": "mqtt://homeassistant.local:1883",
