@@ -186,11 +186,23 @@ Notes:
   via `pupilSourceId`.
 - Plans: `GetUols` only lists `{id, title, subjects, state}` (plus the `subjects`
   and `academicYears` lookups); `state` is `active` / `notstarted` / `finished`.
+  `GetUols {academicYearId: <id>}` returns a **previous** academic year's plans.
   The detail `GetUol` **requires** the body key `id` — `uolId`/`Id` answer
-  `HTTP 500` — and returns three sections: `uol` (overview, incl. *Beskrivning*),
-  `syllabus` (the pedagogical plan, HTML fields) and `statement` (curriculum
-  criteria). A newly published plan also arrives as a notification with
-  `appType: Uol`, `type: UnitOfLearning`, `url: #/uolv2/show/<id>`.
+  `HTTP 500` — and returns three sections:
+  - `uol` — overview rows: *Beskrivning*, *Ämne*, *Termin*, *Startdatum*,
+    *Slutdatum*, *Årskurs*, *Stadier*, *Lärare* (names as `Lastname, Firstname`
+    pairs joined by commas)
+  - `syllabus` — the pedagogical plan in the school's fixed categories:
+    *Översikt*, *Tidplan* (week by week), *Begrepp*, *Arbetssätt*, *Bedömning*,
+    *Kunskapsmål*
+  - `statement` — curriculum criteria, incl. per-level (`levelHeader` E/C/A)
+    assessment texts.
+- `GetAllTasks {id}` returns the **assignments linked to the plan**
+  (`{type, hasMore, tasks[]}`). `GetAllObjectives {id}` answers empty and
+  `GetTimelineEntries` answers `HTTP 500` for a parent account.
+- A plan also arrives as a notification — `appType: Uol`,
+  `type: UnitOfLearning` (published) or `UolUpdated` (changed),
+  `url: #/uolv2/show/<id>`.
 - `npm run probe:uol` maps the plan app and writes `out/uol-detail-*.json`.
 
 ## Home Assistant
