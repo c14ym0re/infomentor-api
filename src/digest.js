@@ -3,7 +3,11 @@
 import { displayName } from './names.js'
 import { formatPeriod } from './plans.js'
 
-const iso = (d) => d.toISOString().slice(0, 10)
+// Lokal dag, inte UTC: rapporten handlar om familjens dygn. Med toISOString
+// blev "idag" fortfarande gårdagen mellan midnatt och 02:00 svensk sommartid,
+// så gårdagens uppgifter listades som kommande i texten men inte i HTML:en.
+const iso = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const plus = (n) => iso(new Date(Date.now() + n * 864e5))
 const day = (d) => String(d || '').slice(0, 10)
 const isDone = (s) => /done|complete|klar/i.test(s || '')
@@ -124,7 +128,8 @@ export function buildDigest(snapshot, opts = {}) {
   const taskLines = []
   for (const p of snapshot.pupils) {
     const ts = snapshot.tasks
-      .filter((t) => t.child === p.name && !isDone(t.status) && t.due && day(t.due) <= plus(30))
+      // Bara framåt: en uppgift vars dag passerat är inte "kommande" längre.
+      .filter((t) => t.child === p.name && !isDone(t.status) && t.due && day(t.due) >= plus(0) && day(t.due) <= plus(30))
       .sort((a, b) => a.due.localeCompare(b.due))
     if (!ts.length) continue
     taskLines.push(`  ${displayName(p.name)}:`)
@@ -147,7 +152,7 @@ export function buildDigest(snapshot, opts = {}) {
   const calLines = []
   for (const p of snapshot.pupils) {
     const evs = snapshot.events
-      .filter((e) => e.kind === 'Kalender' && e.child === p.name && day(e.start) <= week)
+      .filter((e) => e.kind === 'Kalender' && e.child === p.name && day(e.start) >= plus(0) && day(e.start) <= week)
       .sort((a, b) => a.start.localeCompare(b.start))
     if (!evs.length) continue
     calLines.push(`  ${displayName(p.name)}:`)
@@ -189,10 +194,12 @@ function short(text, max) {
 
 /** 'Prov: Samhällsekonomi (23 okt.), Loggbok v.36' — högst tre, sedan +N. */
 function assignmentLine(assignments) {
-  const shown = assignments
+  // "ingår" ska handla om det som väntar — inte om det som redan passerat.
+  const ahead = (assignments ?? []).filter((a) => !a.due || day(a.due) >= plus(0))
+  const shown = ahead
     .slice(0, 3)
     .map((a) => (a.due ? `${a.title} (${fmt(a.due)})` : a.title))
-  if (assignments.length > 3) shown.push(`+${assignments.length - 3}`)
+  if (ahead.length > 3) shown.push(`+${ahead.length - 3}`)
   return shown.join(', ')
 }
 

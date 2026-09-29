@@ -147,3 +147,54 @@ test('notisens appnamn visas med svensk etikett', () => {
   assert.match(lines[1], /^• \[Planering\]/)
   assert.match(lines[2], /^• \[Okänd\]/)
 })
+
+// Lokal dag, som digest.js — annars vore testet tidszonsberoende.
+const iso = (offsetDays) => {
+  const d = new Date(Date.now() + offsetDays * 864e5)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+test('utgångna uppgifter och kalenderposter visas inte som kommande', () => {
+  const snapshot = {
+    collectedAt: new Date().toISOString(),
+    pupils: [{ name: 'Anna' }],
+    events: [{ kind: 'Kalender', child: 'Anna', title: 'Gammalt prov', start: iso(-1) }],
+    absences: [],
+    tasks: [
+      { key: 'a', child: 'Anna', title: 'Gammal uppgift', subject: 'Kemi', due: iso(-1), status: 'Due' },
+      { key: 'b', child: 'Anna', title: 'Kommande uppgift', subject: 'Kemi', due: iso(3), status: 'Due' },
+    ],
+  }
+  const out = buildDigest(snapshot, { events: [] })
+  assert.ok(!out.includes('Gammal uppgift'), 'utgången uppgift ska inte listas')
+  assert.ok(!out.includes('Gammalt prov'), 'passerad kalenderpost ska inte listas')
+  assert.ok(out.includes('Kommande uppgift'), 'kommande uppgift ska listas')
+})
+
+test('dagens uppgift räknas fortfarande som kommande', () => {
+  const snapshot = {
+    collectedAt: new Date().toISOString(),
+    pupils: [{ name: 'Anna' }],
+    events: [],
+    absences: [],
+    tasks: [{ key: 'a', child: 'Anna', title: 'Dagens uppgift', due: iso(0), status: 'Due' }],
+  }
+  assert.ok(buildDigest(snapshot, { events: [] }).includes('Dagens uppgift'))
+})
+
+test('"ingår" hoppar över uppgifter som redan passerat', () => {
+  const lines = formatEventLines([
+    {
+      type: 'plan.new',
+      child: 'Anna',
+      title: 'Kemi - Åk 9 - Syror',
+      assignments: [
+        { title: 'Gammal labb', due: iso(-3) },
+        { title: 'Ny labb', due: iso(5) },
+      ],
+    },
+  ])
+  const rad = lines.find((l) => l.includes('ingår'))
+  assert.ok(rad.includes('Ny labb'))
+  assert.ok(!rad.includes('Gammal labb'))
+})
