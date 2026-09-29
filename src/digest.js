@@ -117,7 +117,10 @@ export function buildDigest(snapshot, opts = {}) {
     taskLines.push(`  ${displayName(p.name)}:`)
     for (const t of ts) {
       const flag = t.overdue ? '  ⚠️ FÖRSENAD' : ''
-      taskLines.push(`    ${fmt(t.due)}  ${t.title}${t.subject ? ` (${t.subject})` : ''}${flag}`)
+      const topic = planTopic(t.plan, t.subject)
+      taskLines.push(
+        `    ${fmt(t.due)}  ${t.title}${t.subject ? ` (${t.subject})` : ''}${topic ? ` — ${topic}` : ''}${flag}`
+      )
     }
   }
   if (taskLines.length) {
@@ -255,6 +258,32 @@ export function formatEventLines(events) {
   for (const a of events.filter((e) => e.type.startsWith('absence.')).slice(0, 10))
     lines.push(`• [${displayName(a.child)}] FRÅNVARO: ${a.title}`)
   return lines
+}
+
+/**
+ * Arbetsområdet ur planeringstiteln, till uppgiftsraden i rapporten.
+ *
+ *   "Teknik - Årskurs 9 - Hur utvecklar vi ny teknik?" → "Hur utvecklar vi ny teknik?"
+ *   "7BD - Samhällskunskap HT26" (ämnet Samhällskunskap) → "" (tillför inget)
+ *
+ * Tom sträng när titeln bara upprepar ämnet, så raden inte blir dubbel.
+ */
+export function planTopic(planTitle, subject) {
+  const full = String(planTitle || '').trim()
+  if (!full) return ''
+  const parts = full.split(' - ')
+  const topic = (parts.length > 1 ? parts[parts.length - 1] : full).trim()
+  if (!topic) return ''
+
+  const norm = (value) => String(value || '').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const subj = norm(subject)
+  const body = norm(topic)
+  if (subj && body.includes(subj)) {
+    // Bara ämnet kvar (eventuellt med klass/termin, t.ex. "HT26") → visa inget.
+    const rest = body.replace(subj, ' ').trim()
+    if (rest.length <= 10) return ''
+  }
+  return topic.length > 46 ? `${topic.slice(0, 46).replace(/\s+\S*$/, '')}…` : topic
 }
 
 function countBits(events) {

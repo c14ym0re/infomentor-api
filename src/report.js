@@ -7,6 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { displayName } from './names.js'
+import { planTopic } from './digest.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(root, 'out')
@@ -164,10 +165,15 @@ const cards = snap.pupils
 
     const taskRows = tasks.length
       ? rowsTable(
-          tasks.map((t) => ({
-            left: esc(shortDate(dayOf(t.due))),
-            main: `${esc(t.title)}${t.subject ? tag(t.subject) : ''}${t.overdue ? flagOverdue() : ''}`,
-          }))
+          tasks.map((t) => {
+            const topic = planTopic(t.plan, t.subject)
+            return {
+              left: esc(shortDate(dayOf(t.due))),
+              main: `${esc(t.title)}${t.subject ? tag(t.subject) : ''}${
+                topic ? `<span style="color:${C.ink3};font-size:14px;"> — ${esc(topic)}</span>` : ''
+              }${t.overdue ? flagOverdue() : ''}`,
+            }
+          })
         )
       : mutedRow('Inga uppgifter att lämna in inom en vecka.')
 
