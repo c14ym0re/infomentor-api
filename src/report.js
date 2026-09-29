@@ -274,7 +274,7 @@ const html = `<!doctype html>
     ${peBanner ? `<tr><td>${peBanner}</td></tr>` : ''}
     ${lunchBox ? `<tr><td>${lunchBox}</td></tr>` : ''}
     ${cards}
-    <tr><td style="padding:8px 0 0;text-align:center;font-family:${FONT};font-size:13px;line-height:18px;color:${C.ink3};">Hämtat från Infomentor · Kommunen</td></tr>
+    <tr><td style="padding:8px 0 0;text-align:center;font-family:${FONT};font-size:13px;line-height:18px;color:${C.ink3};">Hämtat från Infomentor</td></tr>
   </table>
 </td></tr>
 </table>

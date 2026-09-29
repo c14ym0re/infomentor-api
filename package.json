@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "PoC: läs Infomentor (Kommunen) med e-post/lösenord och kartlägg endpoints + barn",
+  "description": "PoC: läs Infomentor (Mentor) med e-post/lösenord och kartlägg endpoints + barn",
   "scripts": {
     "login": "node src/login.js",
     "probe": "node src/probe.js",
