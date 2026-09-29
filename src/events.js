@@ -26,6 +26,22 @@ const KIND_PRIORITY = {
 
 const dayOf = (s) => String(s || '').slice(0, 10)
 
+/** Nyheter som är äldre än så är ifylld historik, inte nyheter (se isStaleNews). */
+export const NEWS_MAX_AGE_DAYS = 30
+
+/**
+ * En nyhet som publicerades för länge sedan ska inte larma bara för att den
+ * dyker upp i arkivet första gången — t.ex. när nyhetslistan nås i efterhand
+ * och bjuder på Lucia 2020. Kräver att anroparen skickat med `today`.
+ */
+function isStaleNews(item, today) {
+  if (item.kind !== 'news' || !today) return false
+  const published = dayOf(item.published)
+  if (!published) return false
+  const age = new Date(`${today}T00:00:00Z`).getTime() - new Date(`${published}T00:00:00Z`).getTime()
+  return Number.isFinite(age) && age > NEWS_MAX_AGE_DAYS * 864e5
+}
+
 /** Fält som, när de ändras, gör att en post räknas som ändrad. */
 const WATCHED_FIELDS = {
   task: ['title', 'subject', 'due', 'status'],
@@ -192,7 +208,7 @@ export function detectChanges(prevIndex, items, opts = {}) {
     if (ignore.has(it.kind)) continue
     const prev = prevIndex.get(it.key)
     if (!prev) {
-      events.push(mkEvent(it, 'new'))
+      if (!isStaleNews(it, opts.today)) events.push(mkEvent(it, 'new'))
       continue
     }
     const changes = changedFields(prev, it)

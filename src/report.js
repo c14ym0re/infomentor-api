@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { displayName } from './names.js'
-import { planTopic } from './digest.js'
+import { planTopic, formatEventLines, countBits } from './digest.js'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const outDir = join(root, 'out')
@@ -19,6 +19,16 @@ if (!existsSync(snapPath)) {
   process.exit(1)
 }
 const snap = JSON.parse(readFileSync(snapPath, 'utf8'))
+
+// Ändringarna sedan förra sammanställningen. watch.js skriver out/events.json
+// precis före renderingen, så HTML och textmejl visar exakt samma rader.
+const eventsPath = join(outDir, 'events.json')
+let changeEvents = []
+try {
+  if (existsSync(eventsPath)) changeEvents = JSON.parse(readFileSync(eventsPath, 'utf8'))
+} catch {
+  changeEvents = []
+}
 
 // ---- design-tokens (Apple-inspirerade, kontrastsäkrade) --------------------
 const FONT =
@@ -256,6 +266,22 @@ const lunchBox = lunch?.length
     `<div style="height:16px;line-height:16px;font-size:0;">&nbsp;</div>`
   : ''
 
+const changeLines = formatEventLines(changeEvents)
+const changesBox = changeLines.length
+  ? box(
+      `<div style="font-weight:600;font-size:17px;line-height:24px;">🆕 Nytt sedan förra sammanställningen: ${esc(
+        countBits(changeEvents).join(', ')
+      )}</div>` +
+        `<div style="margin-top:8px;font-size:15px;line-height:22px;color:${C.ink2};white-space:pre-wrap;">${esc(
+          changeLines.join('\n')
+        )}</div>`,
+      C.tagBg,
+      C.line,
+      C.tagInk
+    ) +
+    `<div style="height:16px;line-height:16px;font-size:0;">&nbsp;</div>`
+  : ''
+
 const preheader = `Imorgon: schema, uppgifter och påminnelser för ${childNames}`
 
 const html = `<!doctype html>
@@ -277,6 +303,7 @@ const html = `<!doctype html>
       <p style="margin:0 0 4px;font-family:${FONT};font-size:17px;line-height:24px;color:${C.ink2};">Inför ${peDay === tomorrow ? 'imorgon' : 'skoldagen'}, ${esc(leadDate)}</p>
       <p style="margin:0;font-family:${FONT};font-size:14px;line-height:20px;color:${C.ink3};">${esc(kidsLine)} — ${totalTasks} uppgift(er) inom 7 dagar</p>
     </td></tr>
+    ${changesBox ? `<tr><td>${changesBox}</td></tr>` : ''}
     ${peBanner ? `<tr><td>${peBanner}</td></tr>` : ''}
     ${lunchBox ? `<tr><td>${lunchBox}</td></tr>` : ''}
     ${cards}

@@ -15,6 +15,19 @@ function dayLabel(isoDate) {
   return `${wd} ${d.getDate()}/${d.getMonth() + 1}`
 }
 
+/** InfoMentors appnamn i notiserna är utvecklarjargong — visa svenska etiketter. */
+const APP_LABELS = {
+  Assignment: 'Uppgift',
+  CalendarV2: 'Kalender',
+  Uol: 'Planering',
+  News: 'Nyhet',
+  Assessment: 'Bedömning',
+}
+const appLabel = (appType) => APP_LABELS[appType] || appType || 'Notis'
+
+/** Fler nyhetsrubriker än så blir en vägg i mejlet — resten sammanfattas. */
+export const NEWS_LINES_MAX = 5
+
 function fmt(d) {
   if (!d) return ''
   const dt = new Date(d)
@@ -225,7 +238,7 @@ export function formatEventLines(events) {
   const lines = []
   for (const n of events.filter((e) => e.type === 'notification.new').slice(0, 15))
     lines.push(
-      `• [${n.appType || 'Notis'}] ${n.title}${n.subTitle && n.subTitle !== n.title ? ` — ${n.subTitle}` : ''}  (${displayName(n.child)}, ${fmt(n.date)})`
+      `• [${appLabel(n.appType)}] ${n.title}${n.subTitle && n.subTitle !== n.title ? ` — ${n.subTitle}` : ''}  (${displayName(n.child)}, ${fmt(n.date)})`
     )
   for (const e of events.filter((e) => e.type === 'calendar.new').slice(0, 15))
     lines.push(`• [${displayName(e.child)}] Nytt i kalendern: ${e.title}  (${fmt(e.start)})`)
@@ -257,6 +270,13 @@ export function formatEventLines(events) {
   }
   for (const a of events.filter((e) => e.type.startsWith('absence.')).slice(0, 10))
     lines.push(`• [${displayName(a.child)}] FRÅNVARO: ${a.title}`)
+  // Nyheter är kontobreda (ingen barnkoppling) och minst tidskritiska — sist.
+  const news = events
+    .filter((e) => e.type === 'news.new')
+    .sort((a, b) => String(b.published).localeCompare(String(a.published)))
+  for (const n of news.slice(0, NEWS_LINES_MAX))
+    lines.push(`• NYHET: ${String(n.title || '').trim()}  (${fmt(n.published)})`)
+  if (news.length > NEWS_LINES_MAX) lines.push(`• …och ${news.length - NEWS_LINES_MAX} äldre nyhet(er)`)
   return lines
 }
 
@@ -286,10 +306,11 @@ export function planTopic(planTitle, subject) {
   return topic.length > 46 ? `${topic.slice(0, 46).replace(/\s+\S*$/, '')}…` : topic
 }
 
-function countBits(events) {
+export function countBits(events) {
   events = dedupeIdenticalPlans(events)
   const c = (t) => events.filter((e) => e.type === t).length
   const bits = [`${c('notification.new')} notis(er)`, `${c('calendar.new')} kalenderhändelse(r)`, `${c('task.new')} ny(a) uppgift(er)`]
+  if (c('news.new')) bits.push(`${c('news.new')} nyhet(er)`)
   if (c('calendar.changed')) bits.push(`${c('calendar.changed')} ändrad(e)`)
   if (c('calendar.removed')) bits.push(`${c('calendar.removed')} borttagen(borttagna)`)
   if (c('plan.new')) bits.push(`${c('plan.new')} ny(a) planering(ar)`)

@@ -2,6 +2,8 @@
 //
 //   node src/watch.js --once     # ett tick (för cron, t.ex. var 20:e minut)
 //   node src/watch.js --digest   # tvinga kvällssammanställning nu
+//   node src/watch.js --preview  # skicka hur rapporten ser ut nu — utan att
+//                                # röra arkivet (händelserna är kvar till kvällen)
 //   node src/watch.js            # loopa med pollMinutes-intervall
 //   lägg till --dry              # inga mejl/MQTT (test)
 //
@@ -46,6 +48,7 @@ const DRY = args.has('--dry')
 const ONCE = args.has('--once')
 const FORCE_DIGEST = args.has('--digest')
 const NO_DIGEST = args.has('--no-digest')
+const PREVIEW = args.has('--preview')
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 
@@ -110,9 +113,45 @@ async function sendEmail(store, { subject, bodyFile, htmlFile, noHtml, events })
   }
 }
 
-async function tick({ forceDigest = false } = {}) {
+/**
+ * Rendera och skicka kvällsrapporten. `preview` skickar samma mejl men rör
+ * inte arkivet — händelserna ligger kvar och följer med i nästa riktiga digest.
+ */
+async function sendDigest(store, snapshot, { preview = false, today = null } = {}) {
+  const pending = store.pendingEvents()
+  // HTML-mejlet renderas av report.js och behöver ändringslistan på fil.
+  writeFileSync(join(outDir, 'events.json'), JSON.stringify(pending, null, 2))
+  if (!DRY) await run(process.execPath, ['src/report.js'])
+  const digest = buildDigest(snapshot, {
+    events: store.getMeta('initialized') === '1' ? pending : null,
+  })
+  writeFileSync(join(outDir, 'digest.txt'), digest)
+  const ok = await sendEmail(store, {
+    subject: (preview ? '[Förhandsvisning] ' : '') + digest.split('\n')[0],
+    bodyFile: join(outDir, 'digest.txt'),
+    htmlFile: join(outDir, 'kvallssammanfattning.html'),
+  })
+  if (ok && !DRY && !preview) {
+    store.markDelivered(pending.map((e) => e.rowId))
+    store.setMeta('digestDate', today)
+  }
+  return ok
+}
+
+async function tick({ forceDigest = false, preview = false } = {}) {
   const store = new Store(config.db)
   try {
+    // Förhandsvisning: rendera och skicka rapporten precis som den ser ut nu,
+    // men lämna arkivet orört — inga händelser markeras som skickade och
+    // ingen insamling görs, så kvällens riktiga rapport blir identisk.
+    if (preview) {
+      const snapPath = join(outDir, 'snapshot.json')
+      if (!existsSync(snapPath)) throw new Error('out/snapshot.json saknas — kör ett tick först.')
+      const snapshot = JSON.parse(readFileSync(snapPath, 'utf8'))
+      await sendDigest(store, snapshot, { preview: true })
+      return
+    }
+
     const initialized = store.getMeta('initialized') === '1'
     // Posttyper som redan fått sin baslinje (se seedNewKinds).
     const seeded = store.seededKinds()
@@ -174,29 +213,17 @@ async function tick({ forceDigest = false } = {}) {
     const due = minutesOf(`${now.getHours()}:${String(now.getMinutes()).padStart(2, '0')}`) >= minutesOf(config.digestAt)
     const already = store.getMeta('digestDate') === today
     const wantDigest = !NO_DIGEST && (forceDigest || (due && !already))
-    if (wantDigest && !DRY) {
-      await run(process.execPath, ['src/report.js'])
-    }
-    if (wantDigest) {
-      const pending = store.pendingEvents()
-      const digest = buildDigest(snapshot, { events: initialized ? pending : null })
-      writeFileSync(join(outDir, 'digest.txt'), digest)
-      const ok = await sendEmail(store, {
-        subject: digest.split('\n')[0],
-        bodyFile: join(outDir, 'digest.txt'),
-        htmlFile: join(outDir, 'kvallssammanfattning.html'),
-      })
-      if (ok && !DRY) {
-        store.markDelivered(pending.map((e) => e.rowId))
-        store.setMeta('digestDate', today)
-      }
-    }
+    if (wantDigest) await sendDigest(store, snapshot, { today })
   } finally {
     store.close()
   }
 }
 
 async function main() {
+  if (PREVIEW) {
+    await tick({ preview: true })
+    return
+  }
   if (FORCE_DIGEST || ONCE) {
     await tick({ forceDigest: FORCE_DIGEST })
     return

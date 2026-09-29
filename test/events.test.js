@@ -202,3 +202,20 @@ test('seedNewKinds ger en ny posttyp en baslinje', () => {
   // andra körningen är typen känd — inget filtreras längre
   assert.equal(seedNewKinds(events, items, first.seeded).events.length, 2)
 })
+
+test('gamla nyheter blir inga händelser (ifyllnad), färska blir det', () => {
+  const items = [
+    { kind: 'news', key: 'news|1', id: '1', title: 'Lucia 2020', published: '2020-12-11' },
+    { kind: 'news', key: 'news|2', id: '2', title: 'Information från skolledningen', published: '2026-08-24' },
+    { kind: 'news', key: 'news|3', id: '3', title: 'Veckobrev åk 6 v. 40', published: '2026-09-28' },
+  ]
+  const events = detectChanges(indexByKey([]), items, { today: '2026-09-29' })
+  assert.deepEqual(events.map((e) => e.title), ['Veckobrev åk 6 v. 40'])
+  assert.equal(events[0].type, 'news.new')
+  assert.equal(events[0].priority, 'digest')
+})
+
+test('utan "today" filtreras inga nyheter (bakåtkompatibelt)', () => {
+  const items = [{ kind: 'news', key: 'news|1', id: '1', title: 'Lucia 2020', published: '2020-12-11' }]
+  assert.equal(detectChanges(indexByKey([]), items).length, 1)
+})

@@ -1,6 +1,13 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildDigest, dedupeIdenticalPlans, formatEventLines, planTopic } from '../src/digest.js'
+import {
+  buildDigest,
+  countBits,
+  dedupeIdenticalPlans,
+  formatEventLines,
+  NEWS_LINES_MAX,
+  planTopic,
+} from '../src/digest.js'
 
 const planEvent = (over = {}) => ({
   type: 'plan.new',
@@ -106,4 +113,37 @@ test('uppgiftsraden i rapporten visar ämnet och arbetsområdet', () => {
   assert.ok(out.includes('Loggbok v.36 (Teknik) — Hur utvecklar vi ny teknik?'))
   assert.ok(out.includes('Glosor (Samhällskunskap)'))
   assert.ok(!out.includes('Glosor (Samhällskunskap) —'))
+})
+
+test('nya nyheter listas (nyast först) och räknas i rubriken', () => {
+  const events = [
+    { type: 'news.new', title: 'Fotografering', published: '2026-09-29' },
+    { type: 'news.new', title: 'Veckobrev åk 6 v. 41', published: '2026-10-06' },
+  ]
+  assert.ok(countBits(events).includes('2 nyhet(er)'))
+  const lines = formatEventLines(events)
+  assert.match(lines[0], /NYHET: Veckobrev åk 6 v\. 41/)
+  assert.match(lines[1], /NYHET: Fotografering/)
+})
+
+test('fler nyheter än taket sammanfattas i en rad', () => {
+  const events = Array.from({ length: NEWS_LINES_MAX + 2 }, (_, i) => ({
+    type: 'news.new',
+    title: `Nyhet ${i}`,
+    published: `2026-09-${String(10 + i).padStart(2, '0')}`,
+  }))
+  const lines = formatEventLines(events)
+  assert.equal(lines.length, NEWS_LINES_MAX + 1)
+  assert.match(lines.at(-1), /…och 2 äldre nyhet\(er\)/)
+})
+
+test('notisens appnamn visas med svensk etikett', () => {
+  const lines = formatEventLines([
+    { type: 'notification.new', appType: 'CalendarV2', title: 'Ny kalenderhändelse', child: 'Anna', date: '2026-09-29' },
+    { type: 'notification.new', appType: 'Uol', title: 'Ny planering', child: 'Anna', date: '2026-09-29' },
+    { type: 'notification.new', appType: 'Okänd', title: 'Något', child: 'Anna', date: '2026-09-29' },
+  ])
+  assert.match(lines[0], /^• \[Kalender\]/)
+  assert.match(lines[1], /^• \[Planering\]/)
+  assert.match(lines[2], /^• \[Okänd\]/)
 })
