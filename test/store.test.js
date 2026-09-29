@@ -51,6 +51,24 @@ test('pruneMissing tar bort poster som försvunnit', () => {
   s.close()
 })
 
+test('pendingEvents: postens eget id skriver inte över radens id (regression)', () => {
+  const s = fresh()
+  const items = itemsFromSnapshot({
+    notifications: [{ id: 999, child: 'A', title: 'Nyhet', date: '2026-09-29' }],
+    tasks: [],
+    events: [],
+    absences: [],
+    news: [],
+  })
+  const ids = s.logEvents(detectChanges(indexByKey([]), items))
+  const [pending] = s.pendingEvents()
+  assert.equal(String(pending.id), '999') // postens eget id bevaras
+  assert.equal(pending.rowId, ids[0]) // radens id är separat
+  s.markDelivered([pending.rowId])
+  assert.equal(s.pendingEvents().length, 0)
+  s.close()
+})
+
 test('events loggas, listas och markeras levererade', () => {
   const s = fresh()
   const events = detectChanges(indexByKey([]), itemsFromSnapshot(snap()))

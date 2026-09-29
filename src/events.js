@@ -22,6 +22,8 @@ const KIND_PRIORITY = {
   'absence.requested': IMMEDIATE,
 }
 
+const dayOf = (s) => String(s || '').slice(0, 10)
+
 /** Fält som, när de ändras, gör att en post räknas som ändrad. */
 const WATCHED_FIELDS = {
   task: ['title', 'subject', 'due', 'status'],
@@ -175,7 +177,11 @@ export function detectChanges(prevIndex, items, opts = {}) {
   for (const [key, prev] of prevIndex) {
     if (seen.has(key)) continue
     if (ignore.has(prev.kind)) continue
-    if (prev.kind === 'calendar' || prev.kind === 'task') events.push(mkEvent(prev, 'removed'))
+    if (prev.kind !== 'calendar' && prev.kind !== 'task') continue
+    // Kalenderfrågan har ett rullande fönster: en händelse som redan passerat
+    // lämnar listan utan att vara "borttagen". Bara framtida borttagningar larmar.
+    if (prev.kind === 'calendar' && opts.today && dayOf(prev.start) < opts.today) continue
+    events.push(mkEvent(prev, 'removed'))
   }
 
   return events

@@ -21,9 +21,10 @@ writeFileSync(join(outDir, 'snapshot.json'), JSON.stringify(snapshot, null, 2))
 const store = new Store(dbPath)
 const initialized = store.getMeta('initialized') === '1'
 const items = itemsFromSnapshot(snapshot)
-const events = initialized ? detectChanges(store.getPrevIndex(), items) : []
+const today = new Date().toISOString().slice(0, 10)
+const events = initialized ? detectChanges(store.getPrevIndex(), items, { today }) : []
 store.applyItems(items)
-store.pruneMissing(items.map((i) => i.key))
+store.pruneMissing(items.filter((i) => i.kind !== 'news').map((i) => i.key))
 if (events.length) store.logEvents(events)
 store.setMeta('initialized', '1')
 store.setMeta('lastPoll', snapshot.collectedAt)

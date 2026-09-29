@@ -140,13 +140,19 @@ export class Store {
     return ids
   }
 
-  /** Händelser som ännu inte levererats, äldst först. */
+  /**
+   * Händelser som ännu inte levererats, äldst först.
+   *
+   * OBS: händelsedata innehåller ofta ett eget `id` (t.ex. notisens id). Det får
+   * inte skriva över databasradens id — därför exponeras rad-id:t som `rowId`
+   * och används för markDelivered. (Buggen som gav upprepade mejl.)
+   */
   pendingEvents({ priority } = {}) {
     const sql = priority
       ? 'SELECT * FROM events WHERE delivered_at IS NULL AND priority = ? ORDER BY id'
       : 'SELECT * FROM events WHERE delivered_at IS NULL ORDER BY id'
     const rows = priority ? this.db.prepare(sql).all(priority) : this.db.prepare(sql).all()
-    return rows.map((r) => ({ id: r.id, ts: r.ts, ...JSON.parse(r.data) }))
+    return rows.map((r) => ({ ...JSON.parse(r.data), rowId: r.id, ts: r.ts }))
   }
 
   /** Markerar händelser som levererade. */

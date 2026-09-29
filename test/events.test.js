@@ -73,6 +73,18 @@ test('borttagen kalenderpost rapporteras, schema ignoreras', () => {
   assert.equal(events[0].priority, 'immediate')
 })
 
+test('borttagen kalenderpost i det förflutna ignoreras (rullande fönster)', () => {
+  const prev = indexByKey(itemsFromSnapshot(snap()))
+  const next = snap({ events: [] })
+  // kalenderposten startar 2026-09-30; med "idag" 2026-10-01 har den bara
+  // lämnat fönstret och ska INTE rapporteras som borttagen
+  assert.equal(detectChanges(prev, itemsFromSnapshot(next), { today: '2026-10-01' }).length, 0)
+  // framtida borttagning rapporteras däremot
+  const future = detectChanges(prev, itemsFromSnapshot(next), { today: '2026-09-29' })
+  assert.equal(future.length, 1)
+  assert.equal(future[0].type, 'calendar.removed')
+})
+
 test('registrerad frånvaro blir immediate', () => {
   const prev = indexByKey(itemsFromSnapshot(snap()))
   const next = snap({ absences: [{ child: 'A', absentToday: true, absentTomorrow: false, pendingLeaveRequests: 0, absentSessionsToday: ['Ma 10:00'] }] })

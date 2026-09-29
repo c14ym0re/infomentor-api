@@ -111,9 +111,12 @@ async function tick({ forceDigest = false } = {}) {
   try {
     const initialized = store.getMeta('initialized') === '1'
     const items = itemsFromSnapshot(snapshot)
-    const events = initialized ? detectChanges(store.getPrevIndex(), items) : []
+    const todayIso = new Date().toISOString().slice(0, 10)
+    const events = initialized ? detectChanges(store.getPrevIndex(), items, { today: todayIso }) : []
     store.applyItems(items)
-    store.pruneMissing(items.map((i) => i.key))
+    // Nyheter är i praktiken append-only: ett tillfälligt ofullständigt svar ska
+    // inte rensa dem (då blir allt "nytt" igen nästa tick).
+    store.pruneMissing(items.filter((i) => i.kind !== 'news').map((i) => i.key))
     if (events.length) store.logEvents(events)
     store.setMeta('initialized', '1')
     store.setMeta('lastPoll', snapshot.collectedAt)
@@ -132,7 +135,7 @@ async function tick({ forceDigest = false } = {}) {
         bodyFile,
         noHtml: true,
       })
-      if (ok && !DRY) store.markDelivered(immediate.map((e) => e.id))
+      if (ok && !DRY) store.markDelivered(immediate.map((e) => e.rowId))
     } else if (immediate.length) {
       log(`${immediate.length} akuta händelser sparas till kvällsdigest (tysta timmar)`)
     }
@@ -156,7 +159,7 @@ async function tick({ forceDigest = false } = {}) {
         htmlFile: join(outDir, 'kvallssammanfattning.html'),
       })
       if (ok && !DRY) {
-        store.markDelivered(pending.map((e) => e.id))
+        store.markDelivered(pending.map((e) => e.rowId))
         store.setMeta('digestDate', today)
       }
     }
