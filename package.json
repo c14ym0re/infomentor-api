@@ -7,6 +7,7 @@
   "scripts": {
     "login": "node src/login.js",
     "probe": "node src/probe.js",
+    "probe:uol": "node src/probe-uol.js",
     "flow": "node src/flowcheck.js",
     "test": "node --no-warnings --test test/*.test.js",
     "history": "node src/history.js",

@@ -175,7 +175,8 @@ after the session above.
 | Assignments | `/task/task/GetTasks` |
 | Attendance | `/attendance/attendance/appData` |
 | Contacts | `/classlist/classlist/appData` (school staff) |
-| Plan/assessments | `/uolv2/uolv2/appData`, `/assessmentv2/assessmentv2/appData` |
+| Plans (Unit of Learning) | list `/UolV2/UolV2/GetUols` (`{}`), detail `/UolV2/UolV2/GetUol` (`{id}`) |
+| Assessments | `/assessmentv2/assessmentv2/appData` |
 
 Notes:
 - `/timetable/timetable/appData` **ignores** `startDate`/`endDate` and returns a
@@ -183,6 +184,14 @@ Notes:
 - A dead session answers `200` with an **empty body**; treat that as logged out.
 - Notifications are aggregated across all children and mapped back to a pupil
   via `pupilSourceId`.
+- Plans: `GetUols` only lists `{id, title, subjects, state}` (plus the `subjects`
+  and `academicYears` lookups); `state` is `active` / `notstarted` / `finished`.
+  The detail `GetUol` **requires** the body key `id` — `uolId`/`Id` answer
+  `HTTP 500` — and returns three sections: `uol` (overview, incl. *Beskrivning*),
+  `syllabus` (the pedagogical plan, HTML fields) and `statement` (curriculum
+  criteria). A newly published plan also arrives as a notification with
+  `appType: Uol`, `type: UnitOfLearning`, `url: #/uolv2/show/<id>`.
+- `npm run probe:uol` maps the plan app and writes `out/uol-detail-*.json`.
 
 ## Home Assistant
 
