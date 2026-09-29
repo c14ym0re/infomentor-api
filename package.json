@@ -13,6 +13,7 @@
     "watch": "node src/watch.js",
     "watch:once": "node src/watch.js --once",
     "digest": "node src/watch.js --digest",
+    "preview": "node src/watch.js --preview",
     "history": "node src/history.js",
     "publish:ha": "node src/publish-ha.js",
     "purge:ha": "node src/publish-ha.js --purge",

@@ -25,7 +25,10 @@ evening report delivered by email.
 - **Home Assistant** sensors via **MQTT Discovery** — no broker credentials
   needed (published through HA's `mqtt.publish`).
 - **History** in SQLite (append-only event log) with search and per-child views.
-- **Evening report** by email — accessible HTML + plain text.
+- **Evening report** by email — accessible HTML + plain text, with the same
+  change list ("what is new since last time") in both halves. School **news** is
+  listed too; anything published more than 30 days ago counts as backfill and
+  never alerts.
 - **Ops** — a weekly **health check** (archive age, log warnings, InfoMentor
   entries in the HA log) and an **issue/fork watch** for your GitHub repos.
 - **Home Assistant tooling** — install a Lovelace **dashboard** from a JSON file
@@ -118,6 +121,8 @@ SMTP needs an **app password**, not your account password (Gmail/Workspace:
 ```bash
 npm run watch:once        # one tick (for cron)
 npm run digest            # force an evening report now
+npm run preview           # email the report as it looks now, but leave the
+                          # archive untouched (the events stay for the real run)
 npm run watch             # long-running loop every pollMinutes
 node src/watch.js --once --dry   # test tick: no email/MQTT
 ```
